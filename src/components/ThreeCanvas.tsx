@@ -7,7 +7,6 @@ const ThreeCanvas: React.FC = () => {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const mousePosition = useRef(new THREE.Vector2(0, 0));
   const targetMousePosition = useRef(new THREE.Vector2(0, 0)); // For smooth transition
-  const [isInRightSection, setIsInRightSection] = useState(false);
 
   useEffect(() => {
     const scene = new THREE.Scene();
@@ -19,43 +18,41 @@ const ThreeCanvas: React.FC = () => {
     renderer.setPixelRatio(window.devicePixelRatio);
     mountRef.current?.appendChild(renderer.domElement);
 
-    const geometry = new THREE.PlaneGeometry(2, 2);
+    const geometry = new THREE.PlaneGeometry(2, 2); // Plane covers the full screen
 
-    // White smoke background shader
-    const smokeFragmentShader = `
+    // Peach background shader for the right side
+    const fragmentShaderPeach = `
       uniform vec2 u_resolution;
-      uniform float u_time;
-
-      float noise(vec2 p) {
-          return sin(p.x * 10.0 + u_time * 5.0) * 0.5 + 0.5;
-      }
 
       void main() {
           vec2 st = gl_FragCoord.xy / u_resolution;
-          float n = noise(st + vec2(0.0, u_time)); // Add some dynamic noise
 
-          // Define smoke color
-          vec3 color = vec3(1.0, 1.0, 1.0) * n; // White smoke
-          gl_FragColor = vec4(color, 1.0);
+          // Only apply the peach color to the right half of the screen
+          if (st.x > 0.5) {
+              vec3 peachColor = vec3(1.0, 0.8, 0.7); // Peach color
+              gl_FragColor = vec4(peachColor, 1.0);
+          } else {
+              discard; // Discard fragments on the left side
+          }
       }
     `;
 
-    const smokeShaderMaterial = new THREE.ShaderMaterial({
+    const peachShaderMaterial = new THREE.ShaderMaterial({
       uniforms: {
         u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-        u_time: { value: 0.0 },
       },
-      fragmentShader: smokeFragmentShader,
+      fragmentShader: fragmentShaderPeach,
+      transparent: true,
     });
 
-    const smokePlane = new THREE.Mesh(geometry, smokeShaderMaterial);
-    scene.add(smokePlane);
+    const peachPlane = new THREE.Mesh(geometry, peachShaderMaterial);
+    peachPlane.position.set(0, 0, 0); // Position the peach plane at the back
+    scene.add(peachPlane);
 
-    // Main pink animation shader with vignette effect
+    // Main pink animation shader with gradient and vignette effect
     const fragmentShaderPink = `
       uniform vec2 u_resolution;
       uniform vec2 u_mouse;
-      uniform bool u_isInRightSection;
       uniform float u_time;
 
       float fluctuation(float x, float time) {
@@ -74,12 +71,25 @@ const ThreeCanvas: React.FC = () => {
 
           float intensity = smoothstep(startDistance + fluctuationEffect, startDistance - size, dist);
 
-          // Main pink color gradient
-          vec3 color = mix(vec3(1.0, 0.92, 0.98), vec3(0.8, 0.2, 0.67), intensity * middleFade);
+          // Define gradient colors for pink
+          vec3 lightPink = vec3(1.0, 0.6, 0.8); // Light pink color
+          vec3 darkPink = vec3(0.8, 0.2, 0.67); // Dark pink color
+          vec3 pinkGradient = mix(lightPink, darkPink, st.y); // Gradient from light to dark pink
 
-          // Vignette effect
-          float vignette = smoothstep(0.6, 1.0, length(st - vec2(0.5, 0.5)));
-          color = mix(color, vec3(1.0), vignette); // Mix with white based on vignette
+          // Define blue color for the edges
+          vec3 blueColor = vec3(0.3, 0.5, 1.0);
+
+          // Apply a blue tint only at the edges where the intensity is low
+          float edgeFactor = smoothstep(0.0, 0.5, intensity);
+          vec3 color = mix(blueColor, pinkGradient, edgeFactor); // Blend blue and pink gradient at the edges
+
+          // Apply the intensity to the blended color to mix with the gradient
+          vec3 baseColor = vec3(1.0, 0.92, 0.98);
+          color = mix(baseColor, color, intensity);
+
+          // Vignette effect - keep it white
+          float vignette = smoothstep(0.8, 1.0, length(st - vec2(0.5, 0.5)));
+          color = mix(color, vec3(1.0), vignette); // Mix with white for the vignette effect
 
           gl_FragColor = vec4(color, 1.0);
       }
@@ -89,106 +99,22 @@ const ThreeCanvas: React.FC = () => {
       uniforms: {
         u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
         u_mouse: { value: mousePosition.current },
-        u_isInRightSection: { value: isInRightSection },
         u_time: { value: 0.0 },
       },
       fragmentShader: fragmentShaderPink,
+      transparent: true,
     });
 
     const mainPlanePink = new THREE.Mesh(geometry, shaderMaterialPink);
+    mainPlanePink.position.set(0, 0, 0.1); // Position on top of the peach plane
     scene.add(mainPlanePink);
 
-    // Main sky blue animation shader with vignette effect
-    const fragmentShaderBlue = `
-      uniform vec2 u_resolution;
-      uniform vec2 u_mouse;
-      uniform bool u_isInRightSection;
-      uniform float u_time;
-
-      float fluctuation(float x, float time) {
-          return 0.5 * sin(10.0 * (x + time * 1.5)); // Adjust parameters for fluid movement
-      }
-
-      void main() {
-          vec2 st = gl_FragCoord.xy / u_resolution;
-          float middleFade = smoothstep(0, 0, st.x);
-
-          float dist = length(st - u_mouse + 5);
-
-          float size = 0.5;
-          float startDistance = length(st - vec2(0.0, 1.0));
-          float fluctuationEffect = fluctuation(st.y, u_time);
-
-          float intensity = smoothstep(startDistance + fluctuationEffect, startDistance - size, dist);
-
-          // Main sky blue color gradient
-          vec3 color = mix(vec3(0.7, 0.9, 1.0), vec3(0.1, 0.5, 1.0), intensity * middleFade); // Sky blue gradient
-
-          // Vignette effect
-          float vignette = smoothstep(0.6, 1.0, length(st - vec2(0.5, 0.5)));
-          color = mix(color, vec3(1.0), vignette); // Mix with white based on vignette
-
-          gl_FragColor = vec4(color, 1.0);
-      }
-    `;
-
-    const shaderMaterialBlue = new THREE.ShaderMaterial({
-      uniforms: {
-        u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-        u_mouse: { value: mousePosition.current },
-        u_isInRightSection: { value: isInRightSection },
-        u_time: { value: 0.0 },
-      },
-      fragmentShader: fragmentShaderBlue,
-    });
-
-    const mainPlaneBlue = new THREE.Mesh(geometry, shaderMaterialBlue);
-    mainPlaneBlue.position.set(1000, 1000, 0.5); // Very far position
-    scene.add(mainPlaneBlue);
-
-    // Peach wave animation shader
-    const fragmentShaderPeachWave = `
-      uniform vec2 u_resolution;
-      uniform float u_time;
-
-      void main() {
-          vec2 st = gl_FragCoord.xy / u_resolution;
-
-          // Create a wave effect using a sine function
-          float wave = sin(st.y * 10.0 + u_time * 5.0) * 0.1; // Wave effect
-
-          // Adjust the position for visibility
-          st.y += wave; // Modify y-coordinate for wave movement
-
-          // Define peach color
-          vec3 color = vec3(1.0, 0.8, 0.7); // Peach color
-          gl_FragColor = vec4(color, 0.9); // Increase opacity to make it more visible
-      }
-    `;
-
-    const peachWaveMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-        u_time: { value: 0.0 },
-      },
-      fragmentShader: fragmentShaderPeachWave,
-    });
-
-    const peachWavePlane = new THREE.Mesh(geometry, peachWaveMaterial);
-    peachWavePlane.position.set(-1, -1, -0.5); // Position it to the bottom left corner
-    peachWavePlane.scale.set(2.5, 2.5, 1); // Scale the plane for better coverage
-    scene.add(peachWavePlane);
-
     const animate = () => {
-      smokeShaderMaterial.uniforms.u_time.value += 0.01;
       shaderMaterialPink.uniforms.u_time.value += 0.01;
-      shaderMaterialBlue.uniforms.u_time.value += 0.01;
-      peachWaveMaterial.uniforms.u_time.value += 0.01; // Animate peach wave
 
       // Update mouse position with smooth transition
       mousePosition.current.lerp(targetMousePosition.current, 0.1); // Adjust the factor for delay
       shaderMaterialPink.uniforms.u_mouse.value.copy(mousePosition.current);
-      shaderMaterialBlue.uniforms.u_mouse.value.copy(mousePosition.current);
 
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
@@ -198,21 +124,23 @@ const ThreeCanvas: React.FC = () => {
 
     // Update mouse position
     const handleMouseMove = (event: MouseEvent) => {
-      const mouseX = event.clientX;
-
-      // const isMouseInRightSection = mouseX > window.innerWidth / 2;
-      const isMouseInRightSection = true;
-
-      setIsInRightSection(isMouseInRightSection);
-
-      if (isMouseInRightSection) {
-        targetMousePosition.current.x = (event.clientX / window.innerWidth) * 2 - 1; // Normalize x
-        targetMousePosition.current.y = -(event.clientY / window.innerHeight) * 2 + 1; // Normalize y
-      }
+      targetMousePosition.current.x = (event.clientX / window.innerWidth) * 2 - 1; // Normalize x
+      targetMousePosition.current.y = -(event.clientY / window.innerHeight) * 2 + 1; // Normalize y
     };
-   
 
     window.addEventListener("mousemove", handleMouseMove);
+
+    // Handle window resize
+    window.addEventListener("resize", () => {
+      camera.left = -1;
+      camera.right = 1;
+      camera.top = 1;
+      camera.bottom = -1;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      peachShaderMaterial.uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+      shaderMaterialPink.uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+    });
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
